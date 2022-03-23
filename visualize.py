@@ -1,5 +1,7 @@
 import random
 import glob
+
+import matplotlib.animation
 import netCDF4 as nc
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,6 +9,20 @@ import math
 from datetime import datetime, timedelta
 from matplotlib import cm
 from matplotlib.ticker import MaxNLocator
+
+earthRadius = r = 6371
+
+
+def applyWindow(window, latitude, longitude, data):
+    latCondition = (latitude > window[1]['lat']) & (latitude < window[0]['lat'])
+    longCondition = (longitude > window[0]['lon']) & (longitude < window[1]['lon'])
+    combinedCondition = latCondition & longCondition
+
+    latitude = np.extract(combinedCondition, latitude)
+    longitude = np.extract(combinedCondition, longitude)
+    data = np.extract(combinedCondition, data)
+
+    return latitude, longitude, data
 
 
 def degToRad(arr):
@@ -78,10 +94,10 @@ def read_pass_number(ncid):
 
 def read_variable_data(ncid, varname):
     if len(ncid) > 1:
-        data = []
-        for nc in ncid:
-            data.append(np.array(nc.variables[varname][:]))
-        return data
+        row = []
+        for x in range(len(ncid)):
+            row.append(ncid[x].variables[varname][:])
+        return row
     else:
         data = np.array(ncid.variables[varname][:])
         longname = ncid.variables[varname].long_name
@@ -125,8 +141,12 @@ def scatter2DPlot(Xs, Ys, altitudeData):
     plt.show()
 
 
-def scatterPlot(Xs, Ys, Zs, altitudeData, fig, ax, size=0.8):
+def scatterPlot(Xs, Ys, Zs, altitudeData, size=0.8):
     # Plot
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    ax.set_aspect("auto")
+
     ax.scatter(Xs, Ys, Zs, c=altitudeData, s=size)
     return fig, ax
 
@@ -156,16 +176,11 @@ def loadDataFiles():
     return ncid
 
 
-def main():
-    # get variables and metadata
-    print("Reading data")
-    ncid = loadDataFiles()
-    lat = read_variable_data(ncid, "latitude")
-    lon = read_variable_data(ncid, "longitude")
-    altitudeData = read_variable_data(ncid, "depth_or_elevation")
-    passNumbers = read_pass_number(ncid)
-    time = read_variable_data(ncid, "time")
+def getIndicesOfItem(lst, item):
+    return [i for i, x in enumerate(lst) if x == item]
 
+
+def getLatLonBoundingBox():
     # lon = []
     # altitudeData = []
     # for i in altitudeData_raw:
@@ -183,63 +198,89 @@ def main():
     latMax = 58.06 + offset
     lonMin = 7.72 - offset
     lonMax = 12.78 + offset
-    listOfPasses = unique(passNumbers)
-
     print(str(str(latMin) + "," + str(lonMin) + "," + str(latMax) + "," + str(lonMax).strip()))
+    return latMin, latMax, lonMin, lonMax
 
-    x = []
-    y = []
-    z = []
-    c = []
 
-    r = 6371
-    p = 0
+def main():
+    # get variables and metadata
+    print("Reading data")
+    ncid = loadDataFiles()
+    latList = read_variable_data(ncid, "latitude")
+    lonList = read_variable_data(ncid, "longitude")
+    altitudeDataList = read_variable_data(ncid, "depth_or_elevation")
+    passNumbers = read_pass_number(ncid)
+    time = read_variable_data(ncid, "time")
 
-    pass1 = []
+    # Remove values that are outside the specified window
+    denmark = [{'lat': 58.06, 'lon': 7.72},
+               {'lat': 54.0, 'lon': 12.78}]
 
-    # Get cartesian coordinates
-    print("Calculating Cartesian coordinates")
-    listOfPassesUsed = []
-    for i in range(len(lon)):
-        for j in range(len(lon[i])):
-            tmp_lat = lat[i][j]
-            tmp_lon = lon[i][j]
-            if latMin < tmp_lat < latMax:
-                if lonMin < tmp_lon < lonMax:
-                    currentOrbitPass = passNumbers[i]
-                    if currentOrbitPass in listOfPassesUsed:
-                        continue
-                    # print(tmp_lon, " ", tmp_lat)
-                    res1, res2, res3 = latLongToCart(tmp_lat, tmp_lon, r)
-                    x.append(res1)
-                    y.append(res2)
-                    z.append(res3)
+    ## Create A list of every repeated pass.
+    # Orbits object has indices for which every data point repeats its pass over earth ground tracks.
+    uniquePassNumbers = unique(passNumbers)
+    orbits = []
+    for orbitPass in uniquePassNumbers:
+        indices = getIndicesOfItem(passNumbers, orbitPass)
+        orbits.append(indices)
 
-                    # x[p], y[p] = latLonToMillerCylindrical(tmp_lat, tmp_lon)
-                    # x[p], y[p] = latLonToMercator(tmp_lat, tmp_lon, 0)
-                    c.append(altitudeData[i][j])
+    latMin, latMax, lonMin, lonMax = getLatLonBoundingBox()
 
-                    p += 1
-                    base_date = datetime(2000, 1, 1)
-                    d = base_date + timedelta(seconds=int(time[i][j]))
-                    # print(d.strftime("%Y-%m-%d %H:%M:%S"), ":", tmp_lat, tmp_lon)
+    x = [[]]
+    y = [[]]
+    z = [[]]
+    h = [[]]
 
-        listOfPassesUsed.append(currentOrbitPass)
+    for i in range(10):
+        x.append([])
+        y.append([])
+        z.append([])
+        h.append([])
 
-    # lat, lon = latLonGenerator(len(altitudeData))
-    # x, y, z = latLongToCart(lat, lon, r)
-    # x, y = latLonToMercator(lat, lon, lat[0])
-    # x, y = latLonToMillerCylindrical(lat, lon)
-    nthPoint = 1
-    x = x[::nthPoint]
-    y = y[::nthPoint]
-    z = z[::nthPoint]
-    c = c[::nthPoint]
+    for orbit in orbits:
+        for index, groundPass in enumerate(orbit):
+            latArr = latList[groundPass]
+            lonArr = lonList[groundPass]
+            altArr = altitudeDataList[groundPass]
 
-    # scatter2DPlot(x, y, c)
-    surfacePlot(x, y, )
+            for i in range(len(latArr)):
+                if latMin < latArr[i] < latMax:
+                    if lonMin < lonArr[i] < lonMax:
+                        lat = latArr[i]
+                        lon = lonArr[i]
+                        altitude = altArr[i]
+                        x_, y_, z_ = latLongToCart(lat, lon, earthRadius)
+                        x[index].append(x_)
+                        y[index].append(y_)
+                        z[index].append(z_)
+                        h[index].append(altitude)
+
+    # scatter2DPlot(x, y, h)
+    # surfacePlot(x[0], y[0], h[0])
     # print("Plotting data")
-    # fig, ax = scatterPlot(x, y, c, c)
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    title = ax.set_title('3D Test')
+
+    xPlot, yPlot, hPlot = [], [], []
+    graph, = ax.plot(xPlot, yPlot, hPlot, linestyle="", marker="o")
+
+    plot = [ax.plot_trisurf(x[0], y[0], h[0], cmap=cm.jet, linewidth=1)]
+
+    plt.xlim(min(x[0]), max(x[0]))
+    plt.ylim(min(y[0]), max(y[0]))
+    ax.set_zlim(min(h[0]), max(h[0]))
+
+    def animate(i, plot):
+        ax.clear()
+        ax.plot_trisurf(x[i], y[i], h[i], cmap=cm.jet, linewidth=1)
+        # graph.set_data(xPlot, yPlot)
+        # graph.set_3d_properties(hPlot)
+        print("Plotting i:", i)
+        return title, graph,
+
+    ani = matplotlib.animation.FuncAnimation(fig, animate,
+                                             frames=10, interval=400, fargs=plot, repeat=True)
 
     plt.show()
 
