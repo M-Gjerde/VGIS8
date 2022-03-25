@@ -168,7 +168,7 @@ def scatterCities(ax):
 
 def loadDataFiles():
     # Open the ESA CCI SLA file.
-    path = "data/l2_high_res/*/*STD*.nc"
+    path = "data/l2_caspian/*/*STD*.nc"
     files = glob.glob(path)
     ncid = []
     for file in files:
@@ -189,15 +189,23 @@ def getLatLonBoundingBox():
     ### LAT LON SQUARE
     # View online
     # http://bboxfinder.com/#53.173110,6.811520,57.973150,14.919430
-
+    # AALBORG
     # Upper left 58.06,7.72
     # Lower left 54, 12.78
     # http://bboxfinder.com/#54,7.72,58.06,12.78
+
+    # CASPBIAN SEA
     offset = 0
-    latMin = 54 - offset
-    latMax = 58.06 + offset
-    lonMin = 7.72 - offset
-    lonMax = 12.78 + offset
+    latMin = 33.66 - offset
+    latMax = 53.53 + offset
+    lonMin = 39.16 - offset
+    lonMax = 61.78 + offset
+    # AAlborg
+    # offset = 0
+    # latMin = 54 - offset
+    # latMax = 58.06 + offset
+    # lonMin = 7.72 - offset
+    # lonMax = 12.78 + offset
     print(str(str(latMin) + "," + str(lonMin) + "," + str(latMax) + "," + str(lonMax).strip()))
     return latMin, latMax, lonMin, lonMax
 
@@ -208,7 +216,7 @@ def main():
     ncid = loadDataFiles()
     latList = read_variable_data(ncid, "latitude")
     lonList = read_variable_data(ncid, "longitude")
-    altitudeDataList = read_variable_data(ncid, "depth_or_elevation")
+    altitudeDataList = read_variable_data(ncid, "mean_sea_surface_sol1")
     passNumbers = read_pass_number(ncid)
     time = read_variable_data(ncid, "time")
 
@@ -231,7 +239,7 @@ def main():
     z = [[]]
     h = [[]]
 
-    for i in range(10):
+    for i in range(len(orbits[0])):
         x.append([])
         y.append([])
         z.append([])
@@ -250,6 +258,7 @@ def main():
                         lon = lonArr[i]
                         altitude = altArr[i]
                         x_, y_, z_ = latLongToCart(lat, lon, earthRadius)
+                        # x_, y_ = latLonToMillerCylindrical(lat, lon)
                         x[index].append(x_)
                         y[index].append(y_)
                         z[index].append(z_)
@@ -265,22 +274,31 @@ def main():
     xPlot, yPlot, hPlot = [], [], []
     graph, = ax.plot(xPlot, yPlot, hPlot, linestyle="", marker="o")
 
-    plot = [ax.plot_trisurf(x[0], y[0], h[0], cmap=cm.jet, linewidth=1)]
+    n = 2
+    print("Filtering some points")
+    for i in range(len(x)):
+        x[i] = x[i][::n]
+        y[i] = y[i][::n]
+        z[i] = z[i][::n]
+        h[i] = h[i][::n]
+
+    # plot = [ax.plot_trisurf(x[0], y[0], h[0], cmap=cm.jet, linewidth=1)]
 
     plt.xlim(min(x[0]), max(x[0]))
     plt.ylim(min(y[0]), max(y[0]))
-    ax.set_zlim(min(h[0]), max(h[0]))
+    ax.set_zlim(20, -45)
 
-    def animate(i, plot):
+    def animate(i):
         ax.clear()
-        ax.plot_trisurf(x[i], y[i], h[i], cmap=cm.jet, linewidth=1)
-        # graph.set_data(xPlot, yPlot)
-        # graph.set_3d_properties(hPlot)
+        ax.plot_trisurf(np.array(x[i]), np.array(y[i]), np.array(h[i]), cmap=cm.jet, linewidth=1)
+        # graph.set_data(x[i], y[i])
+        # graph.set_color(h[i])
+        # graph.set_3d_properties(h[i])
         print("Plotting i:", i)
         return title, graph,
 
     ani = matplotlib.animation.FuncAnimation(fig, animate,
-                                             frames=10, interval=400, fargs=plot, repeat=True)
+                                             frames=len(orbits[0]) - 1, interval=1000, repeat=True)
 
     plt.show()
 
