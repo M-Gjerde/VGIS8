@@ -1,15 +1,17 @@
-import random
 import glob
+import random
 
-import matplotlib.animation
-import netCDF4 as nc
+import cartopy.crs as crs
+import cartopy.feature as feat
 import matplotlib.pyplot as plt
+import netCDF4 as nc
 import numpy as np
-import math
-from datetime import datetime, timedelta
 from matplotlib import cm
 from matplotlib.ticker import MaxNLocator
-
+from matplotlib import animation
+from scipy.interpolate import Rbf
+from numpy import inf
+from datetime import datetime, timedelta
 earthRadius = r = 6371
 
 
@@ -166,9 +168,21 @@ def scatterCities(ax):
     ax.scatter(X, Y, 0, c="green", s=5)
 
 
+def interpolateRBF(x, y, z, func='linear'):
+    radialBasis = Rbf(x, y, z, function=func)
+
+    x_new = np.linspace(np.amin(x), np.amax(x), x.shape[0])
+    y_new = np.linspace(np.amin(y), np.amax(y), y.shape[0])
+
+    x_grid, y_grid = np.meshgrid(x_new, y_new)
+    z_new = radialBasis(x_grid.ravel(), y_grid.ravel()).reshape(x_grid.shape)
+
+    return x_new, y_new, z_new
+
+
 def loadDataFiles():
     # Open the ESA CCI SLA file.
-    path = "data/l2_caspian/*/*STD*.nc"
+    path = "data/data_NorthAtlantic/fol_1/*/S6A*STD*.nc"
     files = glob.glob(path)
     ncid = []
     for file in files:
@@ -193,21 +207,31 @@ def getLatLonBoundingBox():
     # Upper left 58.06,7.72
     # Lower left 54, 12.78
     # http://bboxfinder.com/#54,7.72,58.06,12.78
+    offset = 0
 
     # CASPBIAN SEA
-    offset = 0
-    latMin = 33.66 - offset
-    latMax = 53.53 + offset
-    lonMin = 39.16 - offset
-    lonMax = 61.78 + offset
+    # latMin = 33.66 - offset
+    # latMax = 53.53 + offset
+    # lonMin = 39.16 - offset
+    # lonMax = 61.78 + offset
     # AAlborg
-    # offset = 0
     # latMin = 54 - offset
     # latMax = 58.06 + offset
     # lonMin = 7.72 - offset
     # lonMax = 12.78 + offset
+
+    # Atlantic/North sea
+    latMin = np.mod(0, 360)
+    latMax = np.mod(65, 360)
+    lonMin = 255
+    lonMax = 360
+
     print(str(str(latMin) + "," + str(lonMin) + "," + str(latMax) + "," + str(lonMax).strip()))
     return latMin, latMax, lonMin, lonMax
+
+
+def windowToAxes(window):
+    return [window[0]['lon'], window[1]['lon'], window[1]['lat'], window[0]['lat']]
 
 
 def main():
@@ -220,9 +244,15 @@ def main():
     passNumbers = read_pass_number(ncid)
     time = read_variable_data(ncid, "time")
 
+    timestamps = []
+    base_date = datetime(2000, 1, 1)
+    for ti in range(len(time)):
+        for t in time[ti]:
+            d = base_date + timedelta(seconds=t)
+            d.strftime("%Y-%m-%d %H:%M:%S")
+            timestamps.append(d)
+    timestamps = np.array(timestamps)
     # Remove values that are outside the specified window
-    denmark = [{'lat': 58.06, 'lon': 7.72},
-               {'lat': 54.0, 'lon': 12.78}]
 
     ## Create A list of every repeated pass.
     # Orbits object has indices for which every data point repeats its pass over earth ground tracks.
@@ -232,8 +262,13 @@ def main():
         indices = getIndicesOfItem(passNumbers, orbitPass)
         orbits.append(indices)
 
+    print("Num passes: {}, Identical orbits: {}".format(len(orbits), len(orbits[0])))
+
     latMin, latMax, lonMin, lonMax = getLatLonBoundingBox()
 
+    window = [{'lat': latMax, 'lon': lonMax}, {'lat': latMin, 'lon': lonMin}]
+
+    # floats (left, right, bottom, top), optional
     x = [[]]
     y = [[]]
     z = [[]]
@@ -257,24 +292,12 @@ def main():
                         lat = latArr[i]
                         lon = lonArr[i]
                         altitude = altArr[i]
-                        x_, y_, z_ = latLongToCart(lat, lon, earthRadius)
-                        # x_, y_ = latLonToMillerCylindrical(lat, lon)
-                        x[index].append(x_)
-                        y[index].append(y_)
-                        z[index].append(z_)
+                        x[index].append(lon)
+                        y[index].append(lat)
+                        z[index].append(altitude)
                         h[index].append(altitude)
 
-    # scatter2DPlot(x, y, h)
-    # surfacePlot(x[0], y[0], h[0])
-    # print("Plotting data")
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    title = ax.set_title('3D Test')
-
-    xPlot, yPlot, hPlot = [], [], []
-    graph, = ax.plot(xPlot, yPlot, hPlot, linestyle="", marker="o")
-
-    n = 2
+    n = 1
     print("Filtering some points")
     for i in range(len(x)):
         x[i] = x[i][::n]
@@ -282,24 +305,44 @@ def main():
         z[i] = z[i][::n]
         h[i] = h[i][::n]
 
-    # plot = [ax.plot_trisurf(x[0], y[0], h[0], cmap=cm.jet, linewidth=1)]
+        x[i] = np.nan_to_num(np.array(x[i]))
+        x[i][x[i] == -inf] = 0
+        x[i][x[i] == inf] = 0
 
-    plt.xlim(min(x[0]), max(x[0]))
-    plt.ylim(min(y[0]), max(y[0]))
-    ax.set_zlim(20, -45)
+        y[i] = np.nan_to_num(np.array(y[i]))
+        y[i][y[i] == -inf] = 0
+        y[i][y[i] == inf] = 0
+
+        h[i] = np.nan_to_num(np.array(h[i]))
+        h[i][h[i] == -inf] = 0
+        h[i][h[i] == inf] = 0
+
+
+    # _, _, imgInter = interpolateRBF(x[0], y[0], h[0])
+
+    # plt.imshow(imgInter)
+    # plt.show()
+    # input("jhg")
+
+    fig = plt.figure(figsize=(12, 7))
+    ax = plt.axes(projection=crs.PlateCarree())
+    ax.set_global()
+
+
 
     def animate(i):
+        # _, _, imgInter = interpolateRBF(x[i], y[i], h[i])
         ax.clear()
-        ax.plot_trisurf(np.array(x[i]), np.array(y[i]), np.array(h[i]), cmap=cm.jet, linewidth=1)
-        # graph.set_data(x[i], y[i])
-        # graph.set_color(h[i])
-        # graph.set_3d_properties(h[i])
+        # ax.imshow(imgInter, extent=window, transform=crs.PlateCarree(central_longitude=15))
+        ax.add_feature(feat.LAND, zorder=100, edgecolor='k', alpha=0.3)
+        ax.coastlines()
+        plt.scatter(x=x[i], y=y[i], c=h[i], s=2, transform=crs.PlateCarree(central_longitude=15))
+        ax.gridlines(draw_labels=False)
+        fig.savefig("map_{}".format(i), orientation="landscape")
         print("Plotting i:", i)
-        return title, graph,
 
-    ani = matplotlib.animation.FuncAnimation(fig, animate,
-                                             frames=len(orbits[0]) - 1, interval=1000, repeat=True)
-
+    ani = animation.FuncAnimation(fig, animate,
+                                  frames=len(orbits[0]), interval=1000, repeat=True)
     plt.show()
 
     ## AAlborg coordinates
