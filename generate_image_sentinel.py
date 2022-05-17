@@ -140,7 +140,7 @@ def windowToAxes(window):
 def main():
     # get variables and metadata
     print("Reading data")
-    ncid = loadDataFiles("Jason")
+    ncid = loadDataFiles("sentinel")
     latList = read_variable_data(ncid, "lat")
     lonList = read_variable_data(ncid, "lon")
     #seaSurfaceQuality = read_variable_data(ncid, "mean_sea_surface_sol1_qual")
